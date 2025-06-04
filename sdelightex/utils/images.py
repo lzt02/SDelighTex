@@ -6,109 +6,154 @@ import re
 import time
 
 def extract_number(filename):
-    """从文件名中提取数字部分"""
+    """Extract numeric part from a filename for sorting purposes
+    
+    Args:
+        filename (str): Input file name
+    
+    Returns:
+        int: Extracted numeric value
+    
+    Raises:
+        ValueError: If no numeric pattern is found in filename
+    """
     match = re.search(r'\d+', filename)
     if match:
         return int(match.group())
     else:
-        raise ValueError(f"文件名中无数字部分：{filename}")
+        raise ValueError(f"No numeric pattern found in filename: {filename}")
 
 def align_saturation(input_dir, reference_dir, output_dir, group_size=5, ext=("png", "jpg", "jpeg")):
     """
-    批量对齐输入目录中的图像到参考目录中的对应图像，按组计算S通道参数
+    Batch align saturation (S channel) of images in input directory to reference images.
+    Processes images in groups and calculates optimal S-channel transfer parameters per group.
     
-    参数:
-        input_dir (str): 输入图像目录路径
-        reference_dir (str): 参考图像目录路径
-        output_dir (str): 输出目录路径
-        group_size (int): 组的大小，默认为5
-        ext (tuple): 图像文件扩展名，默认为('png', 'jpg', 'jpeg')
+    Parameters:
+        input_dir (str): Path to directory containing images to process
+        reference_dir (str): Path to directory containing reference images
+        output_dir (str): Output directory path for aligned images
+        group_size (int): Number of images processed together to calculate S-channel parameters
+        ext (tuple): Valid image file extensions (default: ('png', 'jpg', 'jpeg'))
+    
+    Returns:
+        tuple: (processed_count, elapsed_time) 
+        processed_count (int): Number of successfully processed images
+        elapsed_time (float): Total processing time in seconds
+    
+    Raises:
+        ValueError: If input and reference images don't match in quantity or naming
     """
+    # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
+    # Normalize extensions to check
     valid_exts = tuple(f".{e.lower()}" for e in ext)
     
-    # 获取并配对文件
+    # Gather and validate matching files in both directories
     input_files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(valid_exts)])
     reference_files = sorted([f for f in os.listdir(reference_dir) if f.lower().endswith(valid_exts)])
     
-    if len(input_files) != len(reference_files) or \
-        any(inf != ref for inf, ref in zip(input_files, reference_files)):
-        raise ValueError("文件不匹配或数量不一致")
+    # Verify file lists match in length and content
+    if len(input_files) != len(reference_files):
+        raise ValueError("Input and reference image counts do not match")
     
-    # 按数字排序文件对
+    if any(inf != ref for inf, ref in zip(input_files, reference_files)):
+        raise ValueError("Mismatched filenames between input and reference directories")
+    
+    # Create full path pairs sorted by numeric part of filename
     file_pairs = sorted(
         [(os.path.join(input_dir, f), os.path.join(reference_dir, f)) for f in input_files],
         key=lambda x: extract_number(x[0].split(os.sep)[-1])
     )
     
-    # 按组划分
+    # Divide image pairs into processing groups
     groups = [file_pairs[i:i+group_size] for i in range(0, len(file_pairs), group_size)]
     
     start_time = time.time()
     processed = 0
     
+    # Process each group of images
     for group_idx, group in enumerate(groups):
-        # 计算组统计量
+        # Initialize accumulators for S-channel statistics
         sum_st, sum_s2, sum_s, sum_t, count = 0.0, 0.0, 0.0, 0.0, 0
         
+        # Gather statistics from all image pairs in current group
         for inf_path, ref_path in group:
             img_input = cv2.imread(inf_path)
             img_ref = cv2.imread(ref_path)
+            
+            # Skip unreadable image pairs
             if img_input is None or img_ref is None:
-                print(f"警告: 无法读取图像 {inf_path} 或 {ref_path}")
+                print(f"Warning: Could not read image {inf_path} or {ref_path}")
                 continue
             
-            # 转换到HSV空间并提取S通道
+            # Convert to HSV color space and extract S channels
             s_input = cv2.cvtColor(img_input, cv2.COLOR_BGR2HSV)[..., 1].astype(np.float32)
-            s_gt = cv2.cvtColor(img_ref, cv2.COLOR_BGR2HSV)[..., 1].astype(np.float32)
+            s_ref = cv2.cvtColor(img_ref, cv2.COLOR_BGR2HSV)[..., 1].astype(np.float32)
             
-            # 计算绝对差值并选择40%最小差值的像素
-            diff = np.abs(s_input - s_gt)
+            # Compute absolute differences
+            diff = np.abs(s_input - s_ref)
+            
+            # Identify pixels with smallest differences (most reliable matches)
             sorted_indices = np.argsort(diff.flatten())
-            k = int(0.4 * diff.size)
+            k = int(1.0 * diff.size)  # Select best 100% of pixels
             
             if k > 0:
                 s_input_flat = s_input.flatten()
-                s_gt_flat = s_gt.flatten()
-                selected_indices = sorted_indices[:k]
+                s_ref_flat = s_ref.flatten()
+                selected_indices = sorted_indices[:k]  # Indices of most similar pixels
                 
-                s_sel = s_input_flat[selected_indices]
-                t_sel = s_gt_flat[selected_indices]
+                s_sel = s_input_flat[selected_indices]  # Input S values
+                t_sel = s_ref_flat[selected_indices]   # Reference S values
                 
-                # 累加统计量
+                # Accumulate statistics for linear regression
                 sum_st += np.sum(s_sel * t_sel)
                 sum_s2 += np.sum(s_sel ** 2)
                 sum_s += np.sum(s_sel)
                 sum_t += np.sum(t_sel)
                 count += k
         
+        # Skip group if no valid pixels for calculation
         if count == 0:
-            print(f"警告: 组 {group_idx} 无可用于计算参数的像素")
+            print(f"Warning: Group {group_idx} has no valid pixels for parameter calculation")
             continue
         
-        # 计算线性变换参数 alpha 和 beta
-        alpha = sum_st / sum_s2 if sum_s2 != 0 else 1.0
-        beta = (sum_t - alpha * sum_s) / count
+        # Compute linear transformation parameters (S_ref = alpha * S_input + beta)
+        # Using ordinary least squares solution
+        denominator = sum_s2 - (sum_s * sum_s) / count
+        if denominator < 1e-6:  # Prevent division by zero
+            alpha = 1.0
+            beta = (sum_t - sum_s) / count
+        else:
+            alpha = (sum_st - sum_s * sum_t / count) / denominator
+            beta = (sum_t - alpha * sum_s) / count
         
-        # 应用参数到组内每个文件
+        # Apply calculated parameters to each image in the group
         for inf_path, ref_path in group:
             img = cv2.imread(inf_path)
             if img is None:
                 continue
             
+            # Convert to HSV color space
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             h, s, v = cv2.split(hsv)
             
-            # 应用线性变换
-            s = np.clip(alpha * s.astype(np.float32) + beta, 0, 255).astype(np.uint8)
+            # Apply linear transformation to saturation channel
+            s_transformed = alpha * s.astype(np.float32) + beta
             
-            # 合并通道并保存结果
-            aligned = cv2.cvtColor(cv2.merge([h, s, v]), cv2.COLOR_HSV2BGR)
+            # Clip to valid range and convert back to uint8
+            s_clipped = np.clip(s_transformed, 0, 255).astype(np.uint8)
+            
+            # Merge channels and convert back to BGR
+            aligned = cv2.merge([h, s_clipped, v])
+            aligned_bgr = cv2.cvtColor(aligned, cv2.COLOR_HSV2BGR)
+            
+            # Save result
             output_path = os.path.join(output_dir, os.path.basename(inf_path))
-            cv2.imwrite(output_path, aligned)
+            cv2.imwrite(output_path, aligned_bgr)
             processed += 1
     
+    # Report processing statistics
     total_time = time.time() - start_time
-    print(f"处理完成: 共处理 {processed} 张图像, 耗时 {total_time:.2f}秒")
+    print(f"Processing complete: {processed} images processed in {total_time:.2f} seconds")
     return processed, total_time
