@@ -45,7 +45,7 @@ def main(source_dir):
 
     # Call the function with the provided arguments
     delight_images(input_folder, output_folder)
-    align_saturation(input_folder, output_folder, output_folder, group_size=5, ext=("png", "jpg", "jpeg"))
+    align_saturation(output_folder, input_folder, output_folder, group_size=5, ext=("png", "jpg", "jpeg"))
 
 
 if __name__ == "__main__":
