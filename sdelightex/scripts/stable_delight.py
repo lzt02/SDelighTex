@@ -38,7 +38,7 @@ def delight_images(input_folder, output_folder):
               type=click.Path(exists=True, file_okay=False, resolve_path=True),
               required=True,
               help='Input directory containing images')
-def main(source_dir, output_dir):
+def main(source_dir):
 
     input_folder = rf"{source_dir}/images"
     output_folder = rf"{source_dir}/images_delighted"
