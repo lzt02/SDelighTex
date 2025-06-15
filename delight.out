@@ -1,0 +1,6 @@
+Using cache found in /home/ziteng/.cache/torch/hub/Stable-X_StableDelight_master
+Keyword arguments {'trust_remote_code': True} are not expected by YosoDelightPipeline and will be ignored.
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  33%|███▎      | 2/6 [00:00<00:00, 19.94it/s]Loading pipeline components...:  67%|██████▋   | 4/6 [00:00<00:00, 10.40it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00,  9.63it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 10.29it/s]
+You have disabled the safety checker for <class 'stabledelight.pipeline_yoso_delight.YosoDelightPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+Processing complete: 290 images processed in 69.61 seconds
+Delight Time Taken: 1377.81 seconds
